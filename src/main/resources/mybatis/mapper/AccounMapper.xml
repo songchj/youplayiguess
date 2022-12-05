@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="xyz.grumpyfurrybear.youplayiguess.mapper.AccountMapper">
+    <select id="queryAccount" resultType="xyz.grumpyfurrybear.youplayiguess.model.Account">
+        select username, password from user
+        where username=#{account.username} and password=#{account.password}
+    </select>
+
+    <select id="queryAccountByName" resultType="xyz.grumpyfurrybear.youplayiguess.model.Account">
+        select username, password from user
+        where username=#{username}
+    </select>
+
+    <select id="save">
+        insert into user (username, password) values (#{account.username}, #{account.password})
+    </select>
+</mapper>
