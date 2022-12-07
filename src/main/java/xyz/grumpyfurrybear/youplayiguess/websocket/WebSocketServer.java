@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 import xyz.grumpyfurrybear.youplayiguess.constants.ClientMessageTypeConstant;
 import xyz.grumpyfurrybear.youplayiguess.constants.Constants;
 import xyz.grumpyfurrybear.youplayiguess.model.ClientMessage;
-import xyz.grumpyfurrybear.youplayiguess.service.WordService;
+import xyz.grumpyfurrybear.youplayiguess.utils.ConfigUtil;
 
 import javax.websocket.OnClose;
 import javax.websocket.OnMessage;
@@ -26,7 +26,7 @@ import java.util.concurrent.*;
 @ServerEndpoint("/websocket/{roomNo}/{name}")
 public class WebSocketServer {
     /**
-     *  与某个客户端的连接对话，需要通过它来给客户端发送消息
+     * 与某个客户端的连接对话，需要通过它来给客户端发送消息
      */
     private static GameManagerService gameManagerService;
 
@@ -51,7 +51,7 @@ public class WebSocketServer {
 
     private static CopyOnWriteArraySet<String> gameStartedRoomSet = new CopyOnWriteArraySet<>();
 
-    private static ConcurrentHashMap<String, RoomStatus> roomWordMap = new ConcurrentHashMap<>();
+    private static ConcurrentHashMap<String, RoomStatus> roomStatusMap = new ConcurrentHashMap<>();
 
     private ObjectMapper mapper = new ObjectMapper();
 
@@ -64,28 +64,36 @@ public class WebSocketServer {
                 new Runnable() {
                     @Override
                     public void run() {
-                        scanRoomStartGame();
+                        try {
+                            scanRoomStartGame();
+                        } catch (Exception e) {
+                            log.error("执行任务出错：{}", e.getMessage());
+                        }
                     }
-                }, 1 , 1, TimeUnit.SECONDS);
+                }, 1, 1, TimeUnit.SECONDS);
     }
 
     private static void scanRoomStartGame() {
-//        for (Map.Entry<String, ConcurrentHashMap<String, WebSocketServer>> roomWebSocketEntry : roomWebSocketMap.entrySet()) {
-//            log.info("当前房间：{}, 人数：{}", roomWebSocketEntry.getKey(), roomWebSocketEntry.getValue().size());
-//            for (String username : roomWebSocketEntry.getValue().keySet()) {
-//                log.info("当前房间：{}，人员：{}", roomWebSocketEntry.getKey(), username);
-//            }
-//        }
         for (Map.Entry<String, ConcurrentHashMap<String, WebSocketServer>> roomWebSocketEntry : roomWebSocketMap.entrySet()) {
-            if (roomWebSocketEntry.getValue().size() == Constants.MAX_MATCH_USER_AMOUNT && !gameStartedRoomSet.contains(roomWebSocketEntry.getKey())) {
+            log.info("当前房间：{}, 人数：{}", roomWebSocketEntry.getKey(), roomWebSocketEntry.getValue().size());
+            for (String username : roomWebSocketEntry.getValue().keySet()) {
+                log.info("当前房间：{}，人员：{}", roomWebSocketEntry.getKey(), username);
+            }
+        }
+        for (Map.Entry<String, ConcurrentHashMap<String, WebSocketServer>> roomWebSocketEntry : roomWebSocketMap.entrySet()) {
+            // TODO 不能只看房间的人数，还要看房间的状态，否则，跳转到结果页，还会继续开始游戏
+            // 开始的时候，用户每人发一个开始游戏的消息，当接收到的数量和房间人数相等时，游戏才能开始
+            // 先简单处理下，直接把连接断开，重新匹配。
+            if (roomWebSocketEntry.getValue().size() == ConfigUtil.getMaxMatchUserAmount() && !gameStartedRoomSet.contains(roomWebSocketEntry.getKey())) {
                 String roomNo = roomWebSocketEntry.getKey();
                 gameStartedRoomSet.add(roomNo);
                 playGame(roomWebSocketEntry.getKey());
             }
         }
     }
+
     @OnOpen
-    public void OnOpen(Session session, @PathParam(value = "roomNo")String roomNo, @PathParam(value = "name") String name){
+    public void OnOpen(Session session, @PathParam(value = "roomNo") String roomNo, @PathParam(value = "name") String name) {
         log.info("房间号：{}, 用户：{} 准备连接", roomNo, name);
         this.session = session;
         this.roomNo = roomNo;
@@ -103,7 +111,7 @@ public class WebSocketServer {
         for (String username : curRoomWebSocketMap.keySet()) {
             log.info("当前房间已有的人：{}", username);
         }
-        curRoomWebSocketMap.put(name,this);
+        curRoomWebSocketMap.put(name, this);
         log.info("更新后当前房间的人数：{}", curRoomWebSocketMap.size());
         for (String username : curRoomWebSocketMap.keySet()) {
             log.info("更新后当前房间已有的人：{}", username);
@@ -118,17 +126,17 @@ public class WebSocketServer {
         log.info("当前房间的词语：{}", roomWords);
         ConcurrentLinkedQueue<String> leftWords = new ConcurrentLinkedQueue<>(roomWords);
         String curWord = leftWords.poll();
-        RoomStatus roomStatus = new RoomStatus(curWord, leftWords);
-        roomWordMap.put(roomNo, roomStatus);
+        String nextWord = leftWords.poll();
+        RoomStatus roomStatus = new RoomStatus(curWord, nextWord, leftWords);
+        roomStatusMap.put(roomNo, roomStatus);
 
-        List<String> usernames = new ArrayList<>();
         // 获取玩家列表
         for (Map.Entry<String, WebSocketServer> roomWebSocketServer : roomWebSocketMap.get(roomNo).entrySet()) {
-            usernames.add(roomWebSocketServer.getKey());
+            roomStatus.usernames.add(roomWebSocketServer.getKey());
             roomStatus.scoreMap.put(roomWebSocketServer.getKey(), 0);
         }
         // 游戏开始，初始化
-        groupSending(roomNo, gameManagerService.buildGameInitMessage(usernames));
+        groupSending(roomNo, gameManagerService.buildGameInitMessage(roomStatus.usernames));
 
         /**
          * 每一个用户都是相同的处理：
@@ -141,9 +149,10 @@ public class WebSocketServer {
             for (Map.Entry<String, WebSocketServer> roomWebSocketServer : roomWebSocketMap.get(roomNo).entrySet()) {
                 String performer = roomWebSocketServer.getKey();
                 // 1. 玩家上场倒计时
-                readyToPerform(roomNo,performer);
+                readyToPerform(roomNo, performer, roomStatus.usernames);
                 // 2. 游戏开始，给第一个词语
                 roomStatus.performer = performer;
+                log.info("玩家上场时，房间状态：{}", roomStatus);
                 gameStart(roomNo, performer, roomStatus.curWord);
                 // 3. 当前玩家表演开始倒计时
                 userPerformCountDown(roomNo);
@@ -151,6 +160,7 @@ public class WebSocketServer {
                 userPerformOver(roomNo);
             }
             // 5. 游戏时间到
+            log.info("游戏结束，房间状态: {}", roomStatus);
             gameOver(roomNo, roomStatus.scoreMap);
         } catch (InterruptedException e) {
             e.printStackTrace();
@@ -159,19 +169,19 @@ public class WebSocketServer {
 
     private static void gameStart(String roomNo, String performer, String word) {
         // 玩家开始表演，currentWord 表示当前词语， performer 表示表演者， countdown 倒计时。
-        groupSending(roomNo, gameManagerService.buildGameStartMessage(word,performer));
+        groupSending(roomNo, gameManagerService.buildGameStartMessage(word, performer));
     }
 
-    private static void readyToPerform(String roomNo, String performer) throws InterruptedException {
+    private static void readyToPerform(String roomNo, String performer, List<String> usernames) throws InterruptedException {
         for (int countdown = Constants.READY_PERFORM_COUNT_DOWN_TIME; countdown >= 1; countdown--) {
-            groupSending(roomNo, gameManagerService.buildReadyToPerformMessage(performer, countdown));
+            groupSending(roomNo, gameManagerService.buildReadyToPerformMessage(performer, countdown, usernames));
             Thread.sleep(1000);
         }
     }
 
     private static void userPerformCountDown(String roomNo) throws InterruptedException {
-        for (int j = Constants.USER_PERFORM_COUNT_DOWN_TIME; j >= 1 ; j--) {
-            groupSending(roomNo, gameManagerService.buildPerformCountDown(j));
+        for (int j = Constants.USER_PERFORM_COUNT_DOWN_TIME; j >= 1; j--) {
+            groupSending(roomNo, gameManagerService.buildPerformCountDownMessage(j));
             Thread.sleep(1000);
         }
     }
@@ -182,6 +192,16 @@ public class WebSocketServer {
 
     private static void gameOver(String roomNo, Map<String, Integer> scoreMap) {
         groupSending(roomNo, gameManagerService.buildGameOverMessage(scoreMap));
+        // 把所有的 Client 断掉
+        try {
+            for (Map.Entry<String, WebSocketServer> entry : roomWebSocketMap.get(roomNo).entrySet()) {
+                if (entry.getValue() != null && entry.getValue().session != null) {
+                    entry.getValue().session.close();
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     @OnClose
@@ -193,19 +213,19 @@ public class WebSocketServer {
         if (curRoomWebSocketMap.size() == 0) {
             roomWebSocketMap.remove(roomNo);
             gameStartedRoomSet.remove(roomNo);
-            roomWordMap.remove(roomNo);
+            roomStatusMap.remove(roomNo);
         }
     }
 
     @OnMessage
-    public void OnMessage(String message){
-        log.info("[WebSocket] 收到消息：{}",message);
+    public void OnMessage(String message) {
+        log.info("[WebSocket] 收到消息：{}", message);
         try {
             ClientMessage clientMessage = mapper.readValue(message, ClientMessage.class);
             // 换词，nextWord 表示下个词语，currentWord 表示当前词语， performer 表示表演者
             switch (clientMessage.getType()) {
                 case ClientMessageTypeConstant.CHANGE_WORD:
-                    gameManagerService.changeWordMessage("刘备", "关羽");
+                    changeWord(clientMessage);
                     break;
                 case ClientMessageTypeConstant.GUESS_WORD:
                     guessWord(clientMessage);
@@ -219,33 +239,62 @@ public class WebSocketServer {
         //groupSending(roomNo, message);
     }
 
+    private void changeWord(ClientMessage clientMessage) {
+        String roomNo = clientMessage.getRoomNo();
+        RoomStatus roomStatus = roomStatusMap.get(roomNo);
+        String curWord = roomStatus.curWord;
+        if (Objects.equals(curWord, "没词了")) {
+            return;
+        }
+        String nextWord = roomStatus.nextWord;
+        log.info("当前词语：{}", curWord);
+        groupSending(roomNo, gameManagerService.buildGuessChangeWordMessage(curWord, nextWord, roomStatus.performer));
+        roomStatus.curWord = nextWord;
+        if (roomStatus.leftWords.size() > 0) {
+            roomStatus.nextWord = roomStatus.leftWords.poll();
+        } else {
+            roomStatus.nextWord = "没词了";
+        }
+
+    }
+
     private void guessWord(ClientMessage clientMessage) {
         String roomNo = clientMessage.getRoomNo();
         String guessWord = clientMessage.getWord();
         String guesser = clientMessage.getUsername();
-        RoomStatus roomStatus = roomWordMap.get(roomNo);
+        if (Objects.equals(guessWord, "没词了")) {
+            return;
+        }
+        RoomStatus roomStatus = roomStatusMap.get(roomNo);
         String curWord = roomStatus.curWord;
-        roomStatus.curWord = roomStatus.leftWords.poll();
+        String nextWord = roomStatus.nextWord;
         log.info("当前词语：{}", curWord);
         log.info("猜的词语：{}", guessWord);
-        roomStatus.scoreMap.put(guesser, roomStatus.scoreMap.get(guesser) + Constants.GUESS_SCORE);
-        roomStatus.scoreMap.put(roomStatus.performer, roomStatus.scoreMap.get(roomStatus.performer) + Constants.PERFORM_SCORE);
         if (curWord.equals(guessWord)) {
+            roomStatus.scoreMap.put(guesser, roomStatus.scoreMap.get(guesser) + Constants.GUESS_SCORE);
+            roomStatus.scoreMap.put(roomStatus.performer, roomStatus.scoreMap.get(roomStatus.performer) + Constants.PERFORM_SCORE);
             groupSending(roomNo, gameManagerService.buildGuessRightMessage(
-                            guesser,
-                            roomStatus.performer,
-                            curWord,
-                            roomStatus.curWord, roomStatus.scoreMap));
+                    guesser, roomStatus.performer, curWord, nextWord, roomStatus.scoreMap));
+            roomStatus.curWord = nextWord;
+            if (roomStatus.leftWords.size() > 0) {
+                roomStatus.nextWord = roomStatus.leftWords.poll();
+            } else {
+                roomStatus.nextWord = "没词了";
+            }
         }
     }
 
     /**
      * 群发
+     *
      * @param roomNo
      * @param message
      */
-    public static void groupSending(String roomNo, String message){
-        log.info("群发消息，房间号：{}， 消息：{}", roomNo, message);
+    public static void groupSending(String roomNo, String message) {
+        if (message != null && !message.contains("\"type\":2")) {
+            log.info("群发消息，房间号：{}， 消息：{}", roomNo, message);
+            log.info("是否是type2：{}", message.contains("\"type\":2"));
+        }
         ConcurrentHashMap<String, WebSocketServer> curRoomWebSocketMap = roomWebSocketMap.get(roomNo);
         for (WebSocketServer socketServer : curRoomWebSocketMap.values()) {
             try {
@@ -258,12 +307,25 @@ public class WebSocketServer {
 
     private static class RoomStatus {
         private String curWord;
+        private String nextWord;
         private ConcurrentLinkedQueue<String> leftWords;
         private String performer;
         private Map<String, Integer> scoreMap = new HashMap<>();
-        public RoomStatus(String curWord, ConcurrentLinkedQueue<String> leftWords) {
+        private List<String> usernames = new ArrayList<>();
+
+        public RoomStatus(String curWord, String nextWord, ConcurrentLinkedQueue<String> leftWords) {
             this.curWord = curWord;
+            this.nextWord = nextWord;
             this.leftWords = leftWords;
+        }
+
+        @Override
+        public String toString() {
+            return "RoomStatus{" +
+                    "curWord='" + curWord + '\'' +
+                    ", performer='" + performer + '\'' +
+                    ", scoreMap=" + scoreMap +
+                    '}';
         }
     }
 }

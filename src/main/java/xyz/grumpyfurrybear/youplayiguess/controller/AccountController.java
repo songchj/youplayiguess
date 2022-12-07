@@ -1,18 +1,29 @@
 package xyz.grumpyfurrybear.youplayiguess.controller;
 
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import xyz.grumpyfurrybear.youplayiguess.model.Account;
 import xyz.grumpyfurrybear.youplayiguess.model.ServerResponse;
+import xyz.grumpyfurrybear.youplayiguess.model.UserSummary;
 import xyz.grumpyfurrybear.youplayiguess.service.AccountService;
+import xyz.grumpyfurrybear.youplayiguess.service.UserSummaryService;
 
+import javax.websocket.server.PathParam;
+import java.util.List;
+
+@Slf4j
 @RestController
 public class AccountController {
     @Autowired
     private AccountService accountService;
+
+    @Autowired
+    private UserSummaryService userSummaryService;
 
     @PostMapping("/users/login")
     public ServerResponse login(@RequestBody Account account) {
@@ -53,5 +64,16 @@ public class AccountController {
         } catch (Exception e) {
             return new ServerResponse(-1, "注册失败，请稍后重试");
         }
+    }
+
+    @GetMapping("/users/{username}/summary")
+    public UserSummary getUserSummary(@PathParam("username") String username) {
+        return userSummaryService.getUserSummaryByName(username);
+    }
+
+    @GetMapping("/users/top/{num}/summary")
+    public List<UserSummary> getTopSummary(@PathParam("num") String num) {
+        log.info("userSummaryService:{}, num:{}", userSummaryService, num);
+        return userSummaryService.getTopUserSummary(num);
     }
 }

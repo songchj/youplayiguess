@@ -24,4 +24,6 @@ public class NumberUtil {
             return generateRandomNumber(length);
         }
     }
+
+
 }

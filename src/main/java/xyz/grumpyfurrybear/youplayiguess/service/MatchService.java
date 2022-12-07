@@ -9,4 +9,6 @@ public interface MatchService {
     void addMatchUser(String username);
 
     void addPlayerMatchObserver(PlayerMatchObserver observer);
+
+    void removePlayerMatchObserver(PlayerMatchObserver observer);
 }

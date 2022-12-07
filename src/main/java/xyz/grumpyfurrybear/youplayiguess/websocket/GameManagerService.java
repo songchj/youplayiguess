@@ -33,11 +33,12 @@ public class GameManagerService {
         }
     }
 
-    public String buildReadyToPerformMessage(String username, int countDown) {
+    public String buildReadyToPerformMessage(String username, int countDown, List<String> usernames) {
         WebSocketMessage message = new WebSocketMessage();
         message.setType(ServerMessageTypeConstant.READY_TO_PERFORM);
         message.setPerformer(username);
         message.setCountdown(countDown);
+        message.setUsers(usernames);
         try {
             return new ObjectMapper().writeValueAsString(message);
         } catch (JsonProcessingException e) {
@@ -46,22 +47,10 @@ public class GameManagerService {
     }
 
 
-    public String buildPerformCountDown(int countDown) {
+    public String buildPerformCountDownMessage(int countDown) {
         WebSocketMessage message = new WebSocketMessage();
         message.setType(ServerMessageTypeConstant.PERFORMER_COUNTDOWN);
         message.setCountdown(countDown);
-        try {
-            return new ObjectMapper().writeValueAsString(message);
-        } catch (JsonProcessingException e) {
-            return DEFAULT_STRING;
-        }
-    }
-
-    public String changeWordMessage(String curWord, String nextWord) {
-        WebSocketMessage message = new WebSocketMessage();
-        message.setType(ServerMessageTypeConstant.CHANGE_WORD);
-        message.setCurrentWord(curWord);
-        message.setNextWord(nextWord);
         try {
             return new ObjectMapper().writeValueAsString(message);
         } catch (JsonProcessingException e) {
@@ -89,6 +78,20 @@ public class GameManagerService {
          */
         WebSocketMessage message = new WebSocketMessage();
         message.setType(ServerMessageTypeConstant.USER_PERFORMER_OVER);
+        try {
+            return new ObjectMapper().writeValueAsString(message);
+        } catch (JsonProcessingException e) {
+            return DEFAULT_STRING;
+        }
+    }
+
+    public String buildGuessChangeWordMessage(String curWord, String nextWord, String performer) {
+        // 5. 换词，nextWord 表示下个词语，currentWord 表示当前词语， performer 表示表演者
+        WebSocketMessage message = new WebSocketMessage();
+        message.setType(ServerMessageTypeConstant.CHANGE_WORD);
+        message.setCurrentWord(curWord);
+        message.setNextWord(nextWord);
+        message.setPerformer(performer);
         try {
             return new ObjectMapper().writeValueAsString(message);
         } catch (JsonProcessingException e) {
@@ -130,4 +133,6 @@ public class GameManagerService {
             return DEFAULT_STRING;
         }
     }
+
+
 }
