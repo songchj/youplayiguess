@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="xyz.grumpyfurrybear.youplayiguess.mapper.UserSummaryMapper">
+    <resultMap id="baseResultMap" type="xyz.grumpyfurrybear.youplayiguess.model.UserSummary">
+        <result column="username" property="username" />
+        <result column="total_score" property="totalScore"/>
+        <result column="total_game_amount" property="totalGameAmount"/>
+        <result column="perform_correct_amount" property="performCorrectAmount"/>
+        <result column="guess_correct_amount" property="guessCorrectAmount"/>
+    </resultMap>
+    <select id="getUserSummaryByName" resultMap="baseResultMap">
+        select username, total_score, total_game_amount, perform_correct_amount, guess_correct_amount from user_summary
+        where username=#{username}
+    </select>
+
+    <select id="getTopUserSummary" resultMap="baseResultMap">
+        select username, total_score, total_game_amount, perform_correct_amount, guess_correct_amount from user_summary
+        order by total_score desc limit #{topN}
+    </select>
+</mapper>
